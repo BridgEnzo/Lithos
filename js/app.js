@@ -877,14 +877,40 @@
     navigator.serviceWorker.register('sw.js').catch(() => { /* non disponible (iframe, navigateur privé…) */ });
   }
   let installEvt = null;
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault(); installEvt = e; $('#installBtn').hidden = false;
-  });
-  $('#installBtn').addEventListener('click', async () => {
-    if (!installEvt) return;
+  const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const ib = $('#installBtn');
+  if (!standalone()) ib.hidden = false;
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; ib.hidden = false; });
+  function installHelp() {
+    const ua = navigator.userAgent;
+    const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const inApp = /FBAN|FBAV|Instagram|Line\/|GitHub|Snapchat|; wv\)/.test(ua);
+    const samsung = /SamsungBrowser/.test(ua);
+    let steps;
+    if (ios) steps = ['Ouvrez cette page dans <strong>Safari</strong> (pas dans une autre appli).', 'Touchez le bouton <strong>Partager</strong> (carré avec une flèche vers le haut).', 'Choisissez <strong>Sur l’écran d’accueil</strong>, puis <strong>Ajouter</strong>.'];
+    else if (samsung) steps = ['Touchez le menu <strong>≡</strong> en bas à droite.', 'Choisissez <strong>Ajouter page à</strong> → <strong>Écran d’accueil</strong>.'];
+    else steps = [
+      'Si la page est ouverte dans une autre appli (barre avec une croix ✕ en haut), touchez <strong>⋮</strong> puis <strong>Ouvrir dans Chrome</strong>.',
+      'Dans Chrome, touchez <strong>⋮</strong> en haut à droite.',
+      'Choisissez <strong>Installer l’application</strong> (ou <strong>Ajouter à l’écran d’accueil</strong>).'];
+    const d = document.createElement('div');
+    d.className = 'modal';
+    d.innerHTML = `<div class="card pad modal-box" role="dialog" aria-modal="true" aria-labelledby="mT">
+      <h2 id="mT">Installer le guide</h2>
+      ${inApp && !ios ? '<p class="small muted">Vous êtes dans le navigateur d’une autre application : l’installation n’y est pas possible.</p>' : ''}
+      <ol>${steps.map((s) => `<li>${s}</li>`).join('')}</ol>
+      <p class="small muted">L’icône « Roches » apparaîtra sur l’écran d’accueil ; le guide fonctionnera aussi hors ligne.</p>
+      <button class="btn primary" id="mClose">J’ai compris</button></div>`;
+    document.body.appendChild(d);
+    const close = () => d.remove();
+    d.addEventListener('click', (e) => { if (e.target === d || e.target.id === 'mClose') close(); });
+  }
+  ib.addEventListener('click', async () => {
+    if (!installEvt) return installHelp();
     installEvt.prompt();
     try { await installEvt.userChoice; } catch (e) {}
-    installEvt = null; $('#installBtn').hidden = true;
+    installEvt = null;
+    if (standalone()) ib.hidden = true;
   });
   window.addEventListener('appinstalled', () => { $('#installBtn').hidden = true; });
 

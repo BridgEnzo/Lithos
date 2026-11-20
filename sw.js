@@ -6,7 +6,7 @@
  *   (300 éléments max) pour être revues sans réseau.
  * Pensez à changer VERSION après chaque modification du site.
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const APP = 'roches-app-' + VERSION;
 const MEDIA = 'roches-media';
 const FILES = [
