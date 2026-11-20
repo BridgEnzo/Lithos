@@ -19,6 +19,8 @@ Site 100 % statique (HTML/CSS/JS, sans framework ni étape de build) : il suffit
 | 🧪 **Guide des tests** | Observation, dureté de Mohs, acide chlorhydrique, densité (avec **calculateur** par pesée hydrostatique), aimant, trait, sens, eau, cassure, indices de terrain, kit du géologue. |
 | 💎 **Minéraux** | Tableau des ~20 minéraux des roches (couleur, dureté, éclat, clivage, indice clé) relié aux fiches. |
 | 🧭 **Classification** | Tableau des roches magmatiques (silice × refroidissement), roches sédimentaires (origine, granulométrie), séries métamorphiques et diagramme pression-température des faciès. |
+| 🏔️ **Formations géologiques** | Pour chaque roche : types de gisements (pluton, coulée, ophiolite, bassin, auréole de contact…) avec exemples, indices de paysage à repérer sur le terrain ; filtre « milieu de formation » dans le catalogue. |
+| 🎨 **Illustrations annotées** | Chaque texture générée porte des repères numérotés avec une légende (minéraux, pâte, vacuoles, fossiles…), l'explication de la texture et l'échelle. |
 | 🗺️ **Carte** | ~175 localités dans le monde (dont beaucoup en France), filtrables par famille. |
 | ★ **Ma collection** | Marquez les roches que vous possédez (enregistré dans le navigateur). |
 | 🌓 Thème clair/sombre, mobile, impression | |
@@ -86,6 +88,8 @@ js/data/
   sedimentaires.js      25 roches
   metamorphiques.js     16 roches
   reference.js          clé de détermination, tests, minéraux, glossaire
+  legendes.js           annotations des illustrations
+  gisements.js          formations géologiques et indices de terrain
 vendor/leaflet/         Leaflet 1.9.4 (cartes), inclus pour fonctionner hors CDN
 images/                 vos photos (optionnel)
 ```

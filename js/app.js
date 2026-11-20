@@ -33,7 +33,7 @@
   const MAGN = ['Non', 'Parfois faible', 'Oui'];
   const GRAIN = { invisible: 'invisible', fin: 'fin', moyen: 'moyen', grossier: 'grossier' };
 
-  const tex = (r, w, h) => window.RockTexture.render(r, w, h);
+  const tex = (r, w, h, leg) => window.RockTexture.render(r, w, h, leg);
   const range = (a, sep) => (a[0] === a[1] ? num(a[0]) : num(a[0]) + (sep || ' – ') + num(a[1]));
   const wikiUrl = (lang, title) => `https://${lang}.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(title)}&go=Go`;
   const osmUrl = (lat, lon) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=12/${lat}/${lon}`;
@@ -220,6 +220,45 @@
   };
 
   /* =========================================================
+   * Illustration annotée et formations géologiques
+   * ========================================================= */
+  function swatchColor(r, key) {
+    const t = r.tex || {}, c = t.c || [];
+    if (key === 'b') return t.b;
+    if (/^c\d$/.test(key)) return c[+key[1]] || t.b;
+    if (t[key] && typeof t[key] === 'string') return t[key];
+    if (key === 'holes') return t.k === 'bulles' ? c[0] : t.k === 'lite' ? '#6b5a3f' : '#0b0b0c';
+    if (key === 'grains') return t.k === 'folie' ? c[2] : c[0];
+    if (key === 'lines') return t.k === 'verre' ? (c[1] || t.b) : (c[1] || c[0] || t.b);
+    return t.b;
+  }
+  function illustration(r, solo) {
+    const leg = (window.LEGENDES || {})[r.id];
+    const info = (window.TEXTURES_INFO || {})[(r.tex || {}).k] || '';
+    const svg = tex(r, 480, solo ? 340 : 260, leg ? leg.l : null);
+    return `<figure class="illu${solo ? ' solo' : ''}">${svg}
+      <figcaption>
+        ${leg ? `<ol class="legend">${leg.l.map((x, i) => {
+          const k = [].concat(x[0])[0];
+          return `<li><span class="num">${i + 1}</span><span class="swc" style="background:${swatchColor(r, k)}"></span><span><strong>${esc(x[1])}</strong>${x[2] ? ' — ' + esc(x[2]) : ''}</span></li>`;
+        }).join('')}</ol>` : ''}
+        <p class="small" style="margin:.6rem 0 .2rem">${esc(info)}${leg && leg.e ? ` <span class="muted">Largeur représentée : ${esc(leg.e)}.</span>` : ''}</p>
+        <p class="tiny muted">Illustration schématique générée, non photographique.${solo && Photos.enabled ? ' <span id="photoMissing">Recherche d’une photo…</span>' : ''}</p>
+      </figcaption>
+    </figure>`;
+  }
+  function gisementsBlock(r) {
+    const G = (window.GISEMENTS || {})[r.id];
+    if (!G) return '';
+    const T = window.GISEMENT_TYPES || {};
+    return `<section class="card block"><h2>🏔️ Formations géologiques où la trouver</h2>
+      <ul class="gis">${G.g.map(([type, txt]) => `<li><a class="gis-type" href="#/catalogue?milieu=${type}" title="Toutes les roches de ce milieu">${T[type] ? T[type][0] + ' ' + esc(T[type][1]) : esc(type)}</a><span>${esc(txt)}</span></li>`).join('')}</ul>
+      ${G.paysage ? `<div class="callout" style="margin-top:1rem"><strong>👀 Sur le terrain, repérez :</strong> ${esc(G.paysage)}</div>` : ''}
+      <p class="small muted" style="margin-top:.8rem">Pour savoir quelles formations affleurent près de chez vous : carte géologique <a href="https://infoterre.brgm.fr/" target="_blank" rel="noopener">BRGM InfoTerre</a> (France) ou <a href="https://macrostrat.org/map" target="_blank" rel="noopener">Macrostrat</a> (monde).</p>
+    </section>`;
+  }
+
+  /* =========================================================
    * Composants
    * ========================================================= */
   function card(r) {
@@ -366,17 +405,26 @@
   }
 
   /* ---------- Catalogue ---------- */
+  function hasMilieu(r, k) {
+    const G = (window.GISEMENTS || {})[r.id];
+    return !!G && G.g.some((x) => x[0] === k);
+  }
   function searchText(r) {
-    return r._s || (r._s = norm([r.nom, r.alias.join(' '), r.groupe, r.resume, r.couleur, r.mineraux.map((m) => m[0]).join(' '), r.lieux.map((l) => l[0] + ' ' + l[1]).join(' ')].join(' ')));
+    const G = (window.GISEMENTS || {})[r.id];
+    return r._s || (r._s = norm([G ? G.g.map((x) => x[1]).join(' ') + ' ' + G.paysage : '',r.nom, r.alias.join(' '), r.groupe, r.resume, r.couleur, r.mineraux.map((m) => m[0]).join(' '), r.lieux.map((l) => l[0] + ' ' + l[1]).join(' ')].join(' ')));
   }
   function viewCatalogue(q) {
-    const st = { famille: q.famille || '', groupe: q.groupe || '', q: q.q || '', coll: q.coll === '1', tri: q.tri || 'nom' };
+    const st = { famille: q.famille || '', groupe: q.groupe || '', milieu: q.milieu || '', q: q.q || '', coll: q.coll === '1', tri: q.tri || 'nom' };
     app.innerHTML = `
       <h1>Catalogue des roches</h1>
       <div class="card filters">
         <div class="filters-row">
           <input type="search" id="fq" placeholder="Nom, minéral, lieu, couleur…" value="${esc(st.q)}" aria-label="Rechercher">
           <select id="fg" aria-label="Sous-famille"></select>
+          <select id="fm" aria-label="Milieu de formation">
+            <option value="">Tous milieux de formation</option>
+            ${Object.entries(window.GISEMENT_TYPES || {}).filter(([k]) => ROCHES.some((r) => hasMilieu(r, k))).map(([k, v]) => `<option value="${k}" ${k === st.milieu ? 'selected' : ''}>${v[0]} ${esc(v[1])}</option>`).join('')}
+          </select>
           <select id="ft" aria-label="Trier">
             <option value="nom">Tri : A → Z</option>
             <option value="densite">Tri : densité</option>
@@ -409,6 +457,7 @@
       let list = ROCHES.filter((r) =>
         (!st.famille || r.famille === st.famille) &&
         (!st.groupe || r.groupe === st.groupe) &&
+        (!st.milieu || hasMilieu(r, st.milieu)) &&
         (!st.coll || Collection.has(r.id)) &&
         words.every((w) => searchText(r).includes(w)));
       const order = { magmatique: 0, sedimentaire: 1, metamorphique: 2 };
@@ -422,6 +471,7 @@
       const p = new URLSearchParams();
       if (st.famille) p.set('famille', st.famille);
       if (st.groupe) p.set('groupe', st.groupe);
+      if (st.milieu) p.set('milieu', st.milieu);
       if (st.q) p.set('q', st.q);
       if (st.coll) p.set('coll', '1');
       if (st.tri !== 'nom') p.set('tri', st.tri);
@@ -434,6 +484,7 @@
     });
     $('#fc').addEventListener('click', () => { st.coll = !st.coll; update(); });
     fg.addEventListener('change', () => { st.groupe = fg.value; update(); });
+    $('#fm').addEventListener('change', (e) => { st.milieu = e.target.value; update(); });
     ft.addEventListener('change', () => { st.tri = ft.value; update(); });
     fq.addEventListener('input', () => { st.q = fq.value; update(); });
     fillGroups(); update();
@@ -475,11 +526,8 @@
           </div>
         </div>
         <div class="media">
-          <figure class="photo">
-            ${p ? `<img src="${esc(bigSrc)}" alt="Photo de ${esc(r.nom)}" referrerpolicy="no-referrer" data-fallback="${esc(p.src)}">` : tex(r, 480, 360)}
-            <figcaption>${p ? credit : `Illustration schématique de la texture (générée).${Photos.enabled ? ' <span id="photoMissing">Recherche d’une photo…</span>' : ''}`}</figcaption>
-          </figure>
-          ${p ? `<figure class="illu">${tex(r, 480, 170)}<figcaption>Illustration schématique de la texture (générée, non photographique)</figcaption></figure>` : ''}
+          ${p ? `<figure class="photo"><img src="${esc(bigSrc)}" alt="Photo de ${esc(r.nom)}" referrerpolicy="no-referrer" data-fallback="${esc(p.src)}"><figcaption>${credit}</figcaption></figure>` : ''}
+          ${illustration(r, !p)}
         </div>
       </section>
 
@@ -516,6 +564,8 @@
             <p>${esc(r.formation)}</p>
             <p><strong>Contexte géologique :</strong> ${esc(r.contexte)}</p>
           </section>
+
+          ${gisementsBlock(r)}
         </div>
 
         <aside>
@@ -544,7 +594,7 @@
     const bigImg = $('.media .photo img');
     if (bigImg) bigImg.addEventListener('error', () => {
       if (bigImg.src !== bigImg.dataset.fallback) bigImg.src = bigImg.dataset.fallback;
-      else { bigImg.replaceWith(document.createRange().createContextualFragment(tex(r, 480, 360))); }
+      else bigImg.closest('figure').remove();
     });
     Micro.render(r, $('#micro'));
     // Mini-carte

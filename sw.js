@@ -6,13 +6,13 @@
  *   (300 éléments max) pour être revues sans réseau.
  * Pensez à changer VERSION après chaque modification du site.
  */
-const VERSION = 'v3';
+const VERSION = 'v4';
 const APP = 'roches-app-' + VERSION;
 const MEDIA = 'roches-media';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/app.js', 'js/texture.js',
-  'js/data/magmatiques.js', 'js/data/sedimentaires.js', 'js/data/metamorphiques.js', 'js/data/reference.js',
+  'js/data/magmatiques.js', 'js/data/sedimentaires.js', 'js/data/metamorphiques.js', 'js/data/reference.js', 'js/data/legendes.js', 'js/data/gisements.js',
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'
 ];
