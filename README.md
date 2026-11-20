@@ -59,6 +59,18 @@ L'image principale d'un article n'est pas toujours un échantillon (parfois un p
 1. déposez l'image dans `images/` (ex. `images/granite.jpg`) ;
 2. ajoutez `photo: 'images/granite.jpg',` dans la fiche correspondante.
 
+## Lames minces (microscope)
+
+Chaque fiche affiche une galerie « Au microscope » : des photos de lames minces trouvées automatiquement sur Wikimedia Commons (recherche « <roche> thin section », filtrée sur les légendes qui parlent de lame mince, de microscope ou de lumière polarisée), avec auteur et licence. Un clic agrandit l'image.
+
+La recherche automatique peut remonter une image mal classée. Pour imposer vos propres choix, ajoutez dans la fiche la liste des fichiers Commons voulus :
+
+```js
+lames: ['File:Granite_thin_section.jpg', 'File:Autre_image.jpg'],
+```
+
+Les résultats sont gardés 14 jours dans le navigateur.
+
 ## Structure
 
 ```

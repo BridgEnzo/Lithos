@@ -139,6 +139,87 @@
   };
 
   /* =========================================================
+   * Lames minces : photos au microscope (Wikimedia Commons)
+   * Par défaut, recherche automatique « <roche> thin section ».
+   * Pour imposer des images précises, ajoutez dans la fiche :
+   *   lames: ['File:Nom_du_fichier.jpg', ...]
+   * ========================================================= */
+  const MICRO_Q = {
+    diatomite: 'diatomite diatoms microscope', argile: 'clay thin section micrograph', loess: 'loess thin section',
+    houille: 'coal petrography microscope', lignite: 'lignite thin section', halite: 'rock salt halite thin section',
+    ferrubane: 'banded iron formation thin section', dolomie: 'dolostone thin section', conglomerat: 'conglomerate thin section',
+    ponce: 'pumice thin section', scorie: 'scoria thin section', oolithique: 'oolite thin section', lumachelle: 'coquina thin section'
+  };
+  const Micro = {
+    key: 'gr-lames-v1', ttl: 1000 * 60 * 60 * 24 * 14,
+    cache: store.get('gr-lames-v1', {}),
+    re: /thin[ _-]?section|lame[ _-]?mince|micrograph|microscop|photomicro|\bxpl\b|\bppl\b|polari[sz]|cross[ _-]?nicol|crossed|petrograph/i,
+    strip(html) { const d = document.createElement('div'); d.innerHTML = html || ''; return (d.textContent || '').trim(); },
+    async api(params) {
+      const url = 'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&prop=imageinfo&iiprop=url%7Cextmetadata&iiurlwidth=480&' + params;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const pages = Object.values(((await res.json()).query || {}).pages || {});
+      pages.sort((a, b) => (a.index || 0) - (b.index || 0));
+      return pages.filter((p) => p.imageinfo && p.imageinfo[0] && p.imageinfo[0].thumburl).map((p) => {
+        const ii = p.imageinfo[0], m = ii.extmetadata || {};
+        return {
+          title: p.title, thumb: ii.thumburl, page: ii.descriptionurl,
+          desc: this.strip(m.ImageDescription && m.ImageDescription.value).slice(0, 220),
+          author: this.strip(m.Artist && m.Artist.value).slice(0, 80),
+          licence: m.LicenseShortName ? m.LicenseShortName.value : ''
+        };
+      });
+    },
+    async get(r) {
+      const c = this.cache[r.id];
+      if (c && Date.now() - c.t < this.ttl) return c.items;
+      let items;
+      if (r.lames && r.lames.length) {
+        items = await this.api('titles=' + encodeURIComponent(r.lames.join('|')));
+      } else {
+        const q = (MICRO_Q[r.id] || r.wiki[1].replace(/\s*\(.*\)/, '') + ' thin section') + ' filetype:bitmap';
+        const found = await this.api('generator=search&gsrnamespace=6&gsrlimit=20&gsrsearch=' + encodeURIComponent(q));
+        items = found.filter((x) => this.re.test(x.title + ' ' + x.desc)).slice(0, 6);
+      }
+      this.cache[r.id] = { t: Date.now(), items };
+      store.set(this.key, this.cache);
+      return items;
+    },
+    searchUrl(r) {
+      const q = MICRO_Q[r.id] || r.wiki[1].replace(/\s*\(.*\)/, '') + ' thin section';
+      return 'https://commons.wikimedia.org/w/index.php?title=Special:MediaSearch&type=image&search=' + encodeURIComponent(q);
+    },
+    async render(r, el) {
+      if (!Photos.enabled) { el.innerHTML = '<p class="muted small">Photos désactivées (voir le pied de page).</p>'; return; }
+      el.innerHTML = '<p class="muted small">Recherche de lames minces sur Wikimedia Commons…</p>';
+      let items;
+      try { items = await this.get(r); } catch (e) { items = null; }
+      if (!el.isConnected) return;
+      if (!items) { el.innerHTML = `<p class="muted small">Impossible de charger les images (hors ligne ?). <a href="${this.searchUrl(r)}" target="_blank" rel="noopener">Chercher sur Wikimedia Commons</a></p>`; return; }
+      if (!items.length) { el.innerHTML = `<p class="muted small">Aucune lame mince trouvée automatiquement pour cette roche. <a href="${this.searchUrl(r)}" target="_blank" rel="noopener">Chercher sur Wikimedia Commons</a></p>`; return; }
+      el.innerHTML = `<div class="micro-grid">${items.map((x, i) => `
+          <figure class="micro">
+            <button class="micro-img" data-i="${i}" aria-label="Agrandir"><img src="${esc(x.thumb)}" alt="${esc(x.desc || x.title)}" loading="lazy" referrerpolicy="no-referrer"></button>
+            <figcaption>${x.desc ? esc(x.desc.length > 110 ? x.desc.slice(0, 110) + '…' : x.desc) + '<br>' : ''}<a href="${esc(x.page)}" target="_blank" rel="noopener">${esc(x.author || 'Auteur')}</a>${x.licence ? ' · ' + esc(x.licence) : ''}</figcaption>
+          </figure>`).join('')}</div>
+        <p class="small muted" style="margin-top:.6rem">Images trouvées automatiquement : vérifiez la légende, une image peut être mal classée. <a href="${this.searchUrl(r)}" target="_blank" rel="noopener">Voir plus sur Commons</a></p>`;
+      el.querySelector('.micro-grid').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-i]');
+        if (!b) return;
+        const x = items[+b.dataset.i];
+        const big = x.thumb.replace(/\/\d+px-/, '/1280px-');
+        const d = document.createElement('div');
+        d.className = 'modal';
+        d.innerHTML = `<figure class="card micro-big"><img src="${esc(big)}" alt="${esc(x.desc || x.title)}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${esc(x.thumb)}'">
+          <figcaption class="small">${esc(x.desc || x.title.replace(/^File:/, ''))}<br><a href="${esc(x.page)}" target="_blank" rel="noopener">${esc(x.author || 'Auteur')}</a>${x.licence ? ' · ' + esc(x.licence) : ''} — Wikimedia Commons</figcaption></figure>`;
+        d.addEventListener('click', (ev) => { if (!ev.target.closest('a')) d.remove(); });
+        document.body.appendChild(d);
+      });
+    }
+  };
+
+  /* =========================================================
    * Composants
    * ========================================================= */
   function card(r) {
@@ -416,6 +497,11 @@
             <p class="small muted" style="margin-top:.6rem">Aide pour reconnaître les minéraux : <a href="#/mineraux">tableau des minéraux</a>.</p>
           </section>
 
+          <section class="card block"><h2>🔬 Au microscope (lames minces)</h2>
+            <p class="small muted">Une lame mince est une tranche de roche de 30 µm observée au microscope polarisant : en lumière polarisée non analysée (LPNA, « PPL ») puis analysée (LPA, « XPL »), où les minéraux prennent leurs couleurs d’interférence.</p>
+            <div id="micro"></div>
+          </section>
+
           <section class="card block"><h2>🧪 Tests et identification</h2>
             <p class="small muted">Cochez au fur et à mesure de vos vérifications (non enregistré).</p>
             <ul class="checklist">${r.tests.map((t, k) => `<li><input type="checkbox" id="t${k}"><label for="t${k}">${esc(t)}</label></li>`).join('')}</ul>
@@ -460,6 +546,7 @@
       if (bigImg.src !== bigImg.dataset.fallback) bigImg.src = bigImg.dataset.fallback;
       else { bigImg.replaceWith(document.createRange().createContextualFragment(tex(r, 480, 360))); }
     });
+    Micro.render(r, $('#micro'));
     // Mini-carte
     const mm = makeMap($('#minimap'));
     if (mm) {
