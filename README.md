@@ -15,6 +15,7 @@ Site 100 % statique (HTML/CSS/JS, sans framework ni étape de build) : il suffit
 | 📚 **Catalogue** | 62 roches, recherche plein texte (nom, minéral, lieu, couleur…), filtres par famille et sous-famille, tri par densité/dureté. |
 | 🧾 **Fiches détaillées** | Photo (Wikimedia Commons), illustration de la texture, carte d'identité (grain, densité, dureté, acide, magnétisme), composition minéralogique, description, **tests d'identification** (liste à cocher), **roches à ne pas confondre** et comment les distinguer, **formation** et contexte géologique, **lieux où l'observer** (mini-carte), usages, anecdote, liens. Fiches imprimables. |
 | 🔎 **Assistant multicritère** | Vous indiquez ce que vous observez (aspect, grain, teinte, acide, dureté, densité, aimant, structure) : les roches compatibles sont classées en direct avec un score et les critères en désaccord. |
+| 📷 **Reconnaissance photo** | Prenez une photo avec l'appareil du téléphone : analyse locale des couleurs (hors ligne), puis identification par IA (Claude) avec candidats, niveau de confiance, arguments pour/contre et tests à faire pour confirmer. |
 | 🗝️ **Clé de détermination** | Une question à la fois jusqu'au nom de la roche ; les 62 roches sont atteignables. |
 | 🧪 **Guide des tests** | Observation, dureté de Mohs, acide chlorhydrique, densité (avec **calculateur** par pesée hydrostatique), aimant, trait, sens, eau, cassure, indices de terrain, kit du géologue. |
 | 💎 **Minéraux** | Tableau des ~20 minéraux des roches (couleur, dureté, éclat, clivage, indice clé) relié aux fiches. |
@@ -51,6 +52,15 @@ Le guide est une application web installable (PWA) : icône sur l'écran d'accue
 - **Android** : ouvrir le site dans **Chrome** → bouton **Installer** en haut de la page, ou menu ⋮ → **Installer l'application**.
 
 Après une modification du site, incrémentez `VERSION` dans `sw.js` pour que les téléphones récupèrent la nouvelle version.
+
+## Reconnaissance par IA
+
+L'onglet **Identifier → 📷 Photo** fonctionne en deux temps :
+
+1. **Analyse locale** (gratuite, sur l'appareil, hors ligne) : couleurs dominantes, teinte, homogénéité ; la teinte peut être reportée dans l'assistant.
+2. **Analyse IA** (optionnelle) : la photo, le lieu de découverte et vos observations sont envoyés à l'API Claude avec la liste des roches du guide. Elle renvoie jusqu'à 3 candidats, avec confiance, arguments et tests de confirmation.
+
+L'analyse IA demande **votre propre clé API Anthropic** (à créer sur [console.anthropic.com](https://console.anthropic.com/settings/keys)), saisie dans l'application. La clé reste dans le navigateur de l'appareil et n'est envoyée qu'à `api.anthropic.com` ; elle n'est jamais dans le code du dépôt. Comptez de l'ordre d'un à quelques centimes par analyse ; fixez une limite de dépense dans la console. Le modèle (Sonnet, Haiku ou Opus) se choisit dans les réglages de l'onglet.
 
 ## Photos
 

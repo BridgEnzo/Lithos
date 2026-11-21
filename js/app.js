@@ -360,6 +360,7 @@
             <button class="btn primary" type="submit">Chercher</button>
           </form>
           <div class="chips">
+            <a class="btn primary" href="#/identifier?mode=photo">📷 Photographier une roche</a>
             <a class="btn" href="#/identifier">🔎 Identifier une roche</a>
             <a class="btn ghost" href="#/roche/${ROCHES[Math.floor(Math.random() * ROCHES.length)].id}">🎲 Roche au hasard</a>
           </div>
@@ -382,6 +383,7 @@
       <div class="section-title"><h2>Outils</h2></div>
       <div class="grid tools">
         <a class="card tool" href="#/identifier"><span class="ico">🔎</span><strong>Assistant d’identification</strong><span class="muted small">Répondez à quelques observations : les roches compatibles sont classées.</span></a>
+        <a class="card tool" href="#/identifier?mode=photo"><span class="ico">📷</span><strong>Reconnaissance photo</strong><span class="muted small">Photographiez une roche : analyse des couleurs et identification par IA.</span></a>
         <a class="card tool" href="#/identifier?mode=cle"><span class="ico">🗝️</span><strong>Clé de détermination</strong><span class="muted small">Questions successives jusqu’au nom de la roche.</span></a>
         <a class="card tool" href="#/tests"><span class="ico">🧪</span><strong>Tests de terrain</strong><span class="muted small">Acide, dureté, densité, aimant… avec calculateur.</span></a>
         <a class="card tool" href="#/carte"><span class="ico">🗺️</span><strong>Carte des localités</strong><span class="muted small">${ROCHES.reduce((n, r) => n + r.lieux.length, 0)} sites remarquables dans le monde.</span></a>
@@ -656,20 +658,338 @@
     if (ans.struct) add(r.struct.includes(ans.struct) ? 1 : 0, 'structure');
     return { s: n ? sum / n : 0, n, bad };
   }
+  /* =========================================================
+   * Reconnaissance par photo
+   *  1. Analyse locale (hors ligne) : couleurs dominantes, teinte, homogénéité
+   *  2. Analyse IA (optionnelle) : API Claude avec la clé personnelle de
+   *     l'utilisateur, stockée uniquement sur l'appareil.
+   * ========================================================= */
+  const AI = {
+    models: [
+      ['claude-sonnet-5-5', 'Claude Sonnet 5.5 — recommandé'],
+      ['claude-haiku-5-5', 'Claude Haiku 5.5 — le plus économique'],
+      ['claude-opus-5-5', 'Claude Opus 5.5 — le plus précis']
+    ],
+    get key() { return store.get('gr-ai-key', ''); },
+    set key(v) { store.set('gr-ai-key', v); },
+    get model() { return store.get('gr-ai-model', 'claude-sonnet-5-5'); },
+    set model(v) { store.set('gr-ai-model', v); },
+    catalogue() {
+      return ROCHES.map((r) => `${r.id} | ${r.nom} | ${FAM[r.famille].sing}, ${r.groupe} | ${r.couleur} | ${r.texture} | HCl : ${HCL[r.hcl]}`).join('\n');
+    },
+    async call(body) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': this.key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = (data.error && data.error.message) || ('HTTP ' + res.status);
+        const err = new Error(msg); err.status = res.status; throw err;
+      }
+      return (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    },
+    async analyse(b64, contexte, observations) {
+      const system = `Tu es un géologue de terrain expert en pétrographie macroscopique. Tu identifies des roches à partir de photos prises par des amateurs avec un téléphone.
+Tu dois choisir parmi le catalogue ci-dessous (identifiant | nom | famille | couleur | texture | réaction à l'acide). Si aucune roche du catalogue ne convient (minéral isolé, objet artificiel comme du béton, de la brique ou du verre, fossile isolé…), dis-le avec "id": null.
+Sois honnête sur l'incertitude : une photo seule ne suffit souvent pas, propose alors plusieurs candidats et les tests qui permettront de trancher.
+
+CATALOGUE
+${this.catalogue()}
+
+Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, de la forme :
+{
+  "photo_exploitable": true,
+  "probleme_photo": null,
+  "description": "ce que tu observes sur la photo (2-3 phrases, en français)",
+  "observations": {
+    "aspect": "cristallin|detritique|fin|vitreux|folie|rubane|poreux|tendre|organique|null",
+    "grain": "invisible|fin|moyen|grossier|null",
+    "teinte": "claire|moyenne|sombre|coloree|null",
+    "struct": "litage|foliation|bandes|vacuoles|fossiles|fragments|porphyrique|prismes|massive|null"
+  },
+  "candidats": [
+    { "id": "identifiant du catalogue ou null", "nom": "nom de la roche", "confiance": 0, "indices": "ce qui va dans ce sens", "contre": "ce qui pourrait contredire" }
+  ],
+  "tests": ["2 à 4 tests simples à faire pour confirmer, du plus discriminant au moins discriminant"],
+  "conseil_photo": "comment prendre une meilleure photo, ou null"
+}
+Donne 1 à 3 candidats triés par confiance décroissante (confiance en %, la somme peut être inférieure à 100).`;
+      const parts = [];
+      if (contexte) parts.push('Lieu / contexte de la trouvaille : ' + contexte);
+      if (observations) parts.push('Observations déjà faites par l’utilisateur : ' + observations);
+      parts.push('Identifie cette roche.');
+      const text = await this.call({
+        model: this.model,
+        max_tokens: 4000,
+        system,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+          { type: 'text', text: parts.join('\n') }
+        ] }]
+      });
+      const m = text.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error('Réponse illisible de l’IA.');
+      return JSON.parse(m[0]);
+    }
+  };
+
+  // Charge l'image, la réduit (1280 px max) et renvoie { canvas, b64 }
+  function loadPhoto(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const max = 1280, k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.naturalWidth * k); cv.height = Math.round(img.naturalHeight * k);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        resolve({ canvas: cv, dataUrl: cv.toDataURL('image/jpeg', 0.85) });
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image illisible')); };
+      img.src = url;
+    });
+  }
+
+  // Couleurs : conversions et analyse locale
+  const hex2rgb = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const rgb2hex = (c) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+  function rgb2lab([r, g, b]) {
+    const f = (v) => { v /= 255; return v > 0.04045 ? ((v + 0.055) / 1.055) ** 2.4 : v / 12.92; };
+    const R = f(r), G = f(g), B = f(b);
+    let x = (R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047, y = R * 0.2126 + G * 0.7152 + B * 0.0722, z = (R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883;
+    const t = (v) => (v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116);
+    x = t(x); y = t(y); z = t(z);
+    return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+  }
+  const dLab = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  function analyseLocale(canvas) {
+    // Zone centrale (60 %) réduite à 64 px de large
+    const sw = canvas.width * 0.6, sh = canvas.height * 0.6;
+    const w = 64, h = Math.max(8, Math.round(64 * sh / sw));
+    const c2 = document.createElement('canvas'); c2.width = w; c2.height = h;
+    const ctx = c2.getContext('2d');
+    ctx.drawImage(canvas, canvas.width * 0.2, canvas.height * 0.2, sw, sh, 0, 0, w, h);
+    const d = ctx.getImageData(0, 0, w, h).data;
+    const px = [];
+    for (let i = 0; i < d.length; i += 4) px.push([d[i], d[i + 1], d[i + 2]]);
+    // k-moyennes (k = 5)
+    let cent = [0, 0.2, 0.45, 0.7, 0.95].map((q) => px[Math.floor(q * (px.length - 1))].slice());
+    let lab = new Array(px.length);
+    for (let it = 0; it < 10; it++) {
+      const sum = cent.map(() => [0, 0, 0, 0]);
+      px.forEach((p, i) => {
+        let bi = 0, bd = 1e9;
+        cent.forEach((c, j) => { const dd = (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2 + (p[2] - c[2]) ** 2; if (dd < bd) { bd = dd; bi = j; } });
+        lab[i] = bi; sum[bi][0] += p[0]; sum[bi][1] += p[1]; sum[bi][2] += p[2]; sum[bi][3]++;
+      });
+      cent = cent.map((c, j) => (sum[j][3] ? [sum[j][0] / sum[j][3], sum[j][1] / sum[j][3], sum[j][2] / sum[j][3]] : c));
+    }
+    const counts = cent.map((_, j) => lab.filter((x) => x === j).length);
+    const clusters = cent.map((c, j) => ({ rgb: c, hex: rgb2hex(c), share: counts[j] / px.length, lab: rgb2lab(c) }))
+      .filter((c) => c.share > 0.02).sort((a, b) => b.share - a.share);
+    // Luminosité, saturation, contraste
+    const lum = px.map((p) => (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / 255);
+    const mean = lum.reduce((a, b) => a + b, 0) / lum.length;
+    const sd = Math.sqrt(lum.reduce((a, b) => a + (b - mean) ** 2, 0) / lum.length);
+    const sat = clusters.reduce((a, c) => { const mx = Math.max(...c.rgb), mn = Math.min(...c.rgb); return a + (mx ? (mx - mn) / mx : 0) * c.share; }, 0);
+    const teinte = sat > 0.32 && mean > 0.18 ? 'coloree' : mean > 0.6 ? 'claire' : mean > 0.36 ? 'moyenne' : 'sombre';
+    // Diversité : couleurs nettement différentes et bien représentées
+    const distinct = clusters.filter((c, i) => c.share > 0.08 && clusters.slice(0, i).every((o) => dLab(o.lab, c.lab) > 18)).length;
+    const hetero = sd > 0.16 || distinct >= 3;
+    // Ressemblance de couleurs avec les illustrations du catalogue (indicatif)
+    const proches = ROCHES.map((r) => {
+      const pal = [r.tex.b].concat(r.tex.c || [], r.tex.p ? [r.tex.p] : [], r.tex.garnet ? [r.tex.garnet] : []).map((x) => rgb2lab(hex2rgb(x)));
+      const dist = clusters.reduce((a, c) => a + c.share * Math.min(...pal.map((p) => dLab(p, c.lab))), 0);
+      return { r, dist };
+    }).sort((a, b) => a.dist - b.dist).slice(0, 6);
+    return { clusters, mean, sd, sat, teinte, hetero, distinct, proches };
+  }
+
+  function renderPhoto(el) {
+    const T = { claire: 'claire', moyenne: 'grise moyenne', sombre: 'sombre', coloree: 'nettement colorée' };
+    el.innerHTML = `
+      <div class="photo-tool">
+        <div>
+          <div class="card pad">
+            <h2 style="font-size:1.25rem">📷 Photographier la roche</h2>
+            <ul class="small tips">
+              <li>Une <strong>cassure fraîche</strong> (pas la surface altérée), de près et nette.</li>
+              <li><strong>Lumière naturelle</strong>, sans flash ; mouiller la surface aide à voir les couleurs.</li>
+              <li>Une <strong>pièce</strong> à côté pour l’échelle, la roche au centre de l’image.</li>
+            </ul>
+            <div class="links">
+              <label class="btn primary file-btn">📷 Prendre une photo<input type="file" accept="image/*" capture="environment" id="camIn" hidden></label>
+              <label class="btn file-btn">🖼️ Galerie<input type="file" accept="image/*" id="galIn" hidden></label>
+            </div>
+            <label class="ctx">Où l’avez-vous trouvée ? <span class="muted">(facultatif, améliore l’analyse IA)</span>
+              <input type="search" id="ctxIn" placeholder="ex. plage en Bretagne, carrière dans le Jura…" value="${esc(store.get('gr-photo-ctx', ''))}">
+            </label>
+          </div>
+          <figure class="card photo-prev" id="prev" hidden><img id="prevImg" alt="Votre photo"></figure>
+        </div>
+        <div id="photoRes"></div>
+      </div>
+      <details class="card pad ai-settings" id="aiSet" ${AI.key ? '' : 'open'}>
+        <summary><strong>⚙️ Reconnaissance par IA</strong> <span class="muted small" id="keyState">${AI.key ? '— clé enregistrée sur cet appareil' : '— à configurer'}</span></summary>
+        <p class="small">L’analyse IA envoie la photo à Claude (Anthropic) avec la liste des roches du guide. Elle nécessite <strong>votre propre clé API</strong>, à créer sur <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> (compte avec quelques euros de crédit). Une analyse coûte de l’ordre d’un à quelques centimes.</p>
+        <p class="small muted">La clé est enregistrée uniquement dans ce navigateur et n’est envoyée qu’à api.anthropic.com. Ne l’utilisez pas sur un appareil partagé ; vous pouvez la supprimer ici à tout moment et fixer une limite de dépense dans la console.</p>
+        <div class="ai-form">
+          <input type="password" id="keyIn" placeholder="sk-ant-…" autocomplete="off" value="${esc(AI.key)}" aria-label="Clé API">
+          <select id="modelIn" aria-label="Modèle">${AI.models.map(([v, l]) => `<option value="${v}" ${v === AI.model ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <div class="links"><button class="btn primary" id="keySave">Enregistrer</button><button class="btn" id="keyDel">Supprimer la clé</button></div>
+          <p class="small" id="keyMsg" aria-live="polite"></p>
+        </div>
+      </details>`;
+
+    let current = null;
+    const res = $('#photoRes', el);
+    res.innerHTML = '<div class="card pad empty-photo"><p class="muted">Prenez ou choisissez une photo : une première analyse des couleurs s’affiche aussitôt, sans connexion. L’analyse IA propose ensuite un nom de roche et les tests pour le confirmer.</p></div>';
+
+    async function onFile(e) {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      res.innerHTML = '<div class="card pad"><p class="muted">Lecture de la photo…</p></div>';
+      try { current = await loadPhoto(file); } catch (err) { res.innerHTML = `<div class="card pad"><p>${esc(err.message)}</p></div>`; return; }
+      $('#prevImg', el).src = current.dataUrl;
+      $('#prev', el).hidden = false;
+      current.local = analyseLocale(current.canvas);
+      showLocal();
+    }
+    $('#camIn', el).addEventListener('change', onFile);
+    $('#galIn', el).addEventListener('change', onFile);
+    $('#ctxIn', el).addEventListener('change', (e) => store.set('gr-photo-ctx', e.target.value.trim()));
+
+    function showLocal() {
+      const L = current.local;
+      res.innerHTML = `
+        <div class="card pad">
+          <h2 style="font-size:1.2rem">🎨 Analyse des couleurs <span class="muted small">(sur l’appareil)</span></h2>
+          <div class="palette">${L.clusters.map((c) => `<span style="background:${c.hex};flex:${Math.max(c.share, 0.06)}" title="${Math.round(c.share * 100)} %"></span>`).join('')}</div>
+          <p>Teinte dominante <strong>${T[L.teinte]}</strong>. ${L.hetero
+            ? 'Plusieurs couleurs nettement distinctes : la roche est probablement faite de <strong>cristaux ou de fragments différents</strong> (roche grenue, détritique ou rubanée).'
+            : 'Couleur assez <strong>homogène</strong> : grain fin, verre, roche faite d’un seul minéral, ou photo trop floue/éloignée.'}</p>
+          <p class="small muted">Couleurs proches des illustrations de : ${L.proches.map((x) => rockLink(x.r.id)).join(', ')}. <em>Indicatif seulement : la couleur ne suffit pas à identifier une roche.</em></p>
+          <div class="links"><button class="btn" id="toAssist">Continuer dans l’assistant (teinte pré-remplie) →</button></div>
+        </div>
+        <div class="card pad" id="aiBox">
+          <h2 style="font-size:1.2rem">🤖 Reconnaissance par IA</h2>
+          ${AI.key
+            ? `<p class="small muted">Modèle : ${esc((AI.models.find((m) => m[0] === AI.model) || [0, AI.model])[1])}. La photo, le lieu indiqué et vos réponses de l’assistant seront envoyés à Anthropic.</p>
+               <button class="btn primary" id="aiGo">Analyser cette photo</button>`
+            : `<p class="small">Configurez votre clé API ci-dessous pour obtenir une identification détaillée.</p>
+               <button class="btn" id="aiCfg">⚙️ Configurer</button>`}
+          <div id="aiOut" aria-live="polite"></div>
+        </div>`;
+      $('#toAssist', res).addEventListener('click', () => {
+        const ans = store.get('gr-ident', {}); ans.teinte = L.teinte; store.set('gr-ident', ans);
+        location.hash = '#/identifier';
+      });
+      const cfg = $('#aiCfg', res);
+      if (cfg) cfg.addEventListener('click', () => { const d = $('#aiSet', el); d.open = true; d.scrollIntoView({ behavior: 'smooth' }); $('#keyIn', el).focus(); });
+      const go = $('#aiGo', res);
+      if (go) go.addEventListener('click', runAI);
+    }
+
+    async function runAI() {
+      const out = $('#aiOut', res), go = $('#aiGo', res);
+      go.disabled = true; go.textContent = 'Analyse en cours…';
+      out.innerHTML = '<p class="muted small" style="margin-top:.8rem">L’IA examine la photo (10 à 30 secondes)…</p>';
+      const ans = store.get('gr-ident', {});
+      const obs = QUESTIONS.filter((qq) => ans[qq.id]).map((qq) => `${qq.titre} : ${(qq.opts.find((o) => o[0] === ans[qq.id]) || [0, ans[qq.id]])[1]}`).join(' ; ');
+      try {
+        const r = await AI.analyse(current.dataUrl.split(',')[1], store.get('gr-photo-ctx', ''), obs);
+        showAI(r, out);
+      } catch (err) {
+        const msg = !navigator.onLine ? 'Pas de connexion : l’analyse IA nécessite Internet.'
+          : err.status === 401 ? 'Clé API refusée : vérifiez-la dans les réglages ci-dessous.'
+          : err.status === 429 ? 'Trop de demandes ou crédit épuisé : réessayez plus tard ou vérifiez votre crédit.'
+          : err.status === 529 || err.status === 503 ? 'Service momentanément surchargé : réessayez dans un instant.'
+          : 'Erreur : ' + err.message;
+        out.innerHTML = `<p class="error" style="margin-top:.8rem">${esc(msg)}</p>`;
+      } finally { go.disabled = false; go.textContent = 'Relancer l’analyse'; }
+    }
+
+    function showAI(r, out) {
+      const cands = (r.candidats || []).slice(0, 3);
+      out.innerHTML = `
+        ${r.photo_exploitable === false ? `<p class="error">Photo difficile à exploiter : ${esc(r.probleme_photo || '')}</p>` : ''}
+        ${r.description ? `<p style="margin-top:.8rem">${esc(r.description)}</p>` : ''}
+        <div class="ai-cands">${cands.map((c, i) => {
+          const rock = c.id && BY_ID[c.id];
+          const conf = Math.max(0, Math.min(100, Math.round(+c.confiance || 0)));
+          return `<div class="ai-cand${i === 0 ? ' top' : ''}">
+            ${rock ? `<a href="#/roche/${rock.id}" class="sw">${tex(rock, 120, 90)}</a>` : '<div class="sw unknown">?</div>'}
+            <div>
+              <div class="ai-name">${rock ? `<a href="#/roche/${rock.id}">${esc(rock.nom)}</a>` : esc(c.nom || 'Hors catalogue')} <span class="score">${conf} %</span></div>
+              <div class="bar"><i style="width:${conf}%;background:${conf > 60 ? 'var(--ok)' : conf > 30 ? 'var(--warn)' : 'var(--bad)'}"></i></div>
+              ${c.indices ? `<p class="small"><strong>Pour :</strong> ${esc(c.indices)}</p>` : ''}
+              ${c.contre ? `<p class="small muted"><strong>Contre :</strong> ${esc(c.contre)}</p>` : ''}
+              ${rock ? `<div class="links">${starBtn(rock.id, 'btn small-btn').replace('>★<', '>★ Ma collection<')}<a class="btn small-btn" href="#/roche/${rock.id}">Voir la fiche</a></div>` : ''}
+            </div></div>`;
+        }).join('')}</div>
+        ${r.tests && r.tests.length ? `<h3 style="font-family:var(--sans);font-size:1rem;margin-top:1rem">🧪 Pour confirmer</h3><ul class="checklist">${r.tests.map((t, i) => `<li><input type="checkbox" id="at${i}"><label for="at${i}">${esc(t)}</label></li>`).join('')}</ul>` : ''}
+        ${r.conseil_photo ? `<p class="small muted" style="margin-top:.8rem">📸 ${esc(r.conseil_photo)}</p>` : ''}
+        ${r.observations ? `<div class="links" style="margin-top:.8rem"><button class="btn" id="obsToAssist">Reporter ces observations dans l’assistant →</button></div>` : ''}
+        <p class="tiny muted" style="margin-top:.8rem">Identification automatique indicative : confirmez toujours avec les tests (acide, dureté, densité).</p>`;
+      const b = $('#obsToAssist', out);
+      if (b) b.addEventListener('click', () => {
+        const ans = store.get('gr-ident', {});
+        QUESTIONS.forEach((qq) => { const v = r.observations[qq.id]; if (v && qq.opts.some((o) => o[0] === v)) ans[qq.id] = v; });
+        store.set('gr-ident', ans);
+        location.hash = '#/identifier';
+      });
+    }
+
+    // Réglages de la clé
+    $('#keySave', el).addEventListener('click', async () => {
+      const k = $('#keyIn', el).value.trim(), msg = $('#keyMsg', el);
+      AI.model = $('#modelIn', el).value;
+      if (!k) { msg.textContent = 'Saisissez une clé.'; return; }
+      AI.key = k;
+      msg.textContent = 'Vérification de la clé…';
+      try {
+        await AI.call({ model: AI.model, max_tokens: 16, messages: [{ role: 'user', content: 'Réponds OK.' }] });
+        msg.textContent = '✅ Clé valide et enregistrée sur cet appareil.';
+        $('#keyState', el).textContent = '— clé enregistrée sur cet appareil';
+        if (current) showLocal();
+      } catch (err) {
+        msg.textContent = err.status === 401 ? '❌ Clé refusée par Anthropic.' : '⚠️ Clé enregistrée, mais la vérification a échoué : ' + err.message;
+      }
+    });
+    $('#modelIn', el).addEventListener('change', (e) => { AI.model = e.target.value; });
+    $('#keyDel', el).addEventListener('click', () => {
+      AI.key = ''; $('#keyIn', el).value = '';
+      $('#keyMsg', el).textContent = 'Clé supprimée de cet appareil.';
+      $('#keyState', el).textContent = '— à configurer';
+      if (current) showLocal();
+    });
+  }
+
   function viewIdentifier(q) {
-    const mode = q.mode === 'cle' ? 'cle' : 'assistant';
+    const mode = ['cle', 'photo'].includes(q.mode) ? q.mode : 'assistant';
     app.innerHTML = `
       <h1>Identifier une roche</h1>
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected="${mode === 'assistant'}" data-mode="assistant">🔎 Assistant multicritère</button>
+        <button role="tab" aria-selected="${mode === 'photo'}" data-mode="photo">📷 Photo</button>
         <button role="tab" aria-selected="${mode === 'cle'}" data-mode="cle">🗝️ Clé de détermination</button>
       </div>
       <div id="identBody"></div>`;
     $('.tabs').addEventListener('click', (e) => {
       const b = e.target.closest('[data-mode]');
-      if (b) location.hash = '#/identifier' + (b.dataset.mode === 'cle' ? '?mode=cle' : '');
+      if (b) location.hash = '#/identifier' + (b.dataset.mode !== 'assistant' ? '?mode=' + b.dataset.mode : '');
     });
     if (mode === 'cle') return renderKey($('#identBody'), q);
+    if (mode === 'photo') return renderPhoto($('#identBody'));
     const ans = store.get('gr-ident', {});
     $('#identBody').innerHTML = `
       <p class="muted">Renseignez ce que vous observez, laissez vide ce que vous ignorez. Les roches compatibles sont classées en direct. <a href="#/tests">Comment faire les tests ?</a></p>
