@@ -51,7 +51,7 @@ Le guide est une application web installable (PWA) : icône sur l'écran d'accue
 - **iPhone / iPad** : ouvrir le site dans **Safari** → bouton **Partager** → **Sur l'écran d'accueil**.
 - **Android** : ouvrir le site dans **Chrome** → bouton **Installer** en haut de la page, ou menu ⋮ → **Installer l'application**.
 
-Après une modification du site, incrémentez `VERSION` dans `sw.js` pour que les téléphones récupèrent la nouvelle version.
+L'application vérifie à chaque ouverture (s'il y a du réseau) qu'elle a la dernière version et se recharge d'elle-même après une mise à jour. Après une modification, incrémentez quand même `VERSION` dans `sw.js` et `APP_VERSION` dans `js/app.js` (affichée en pied de page) : c'est ce qui permet de vérifier sur le téléphone quelle version tourne.
 
 ## Reconnaissance par IA
 

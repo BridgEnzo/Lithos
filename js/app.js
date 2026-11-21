@@ -19,6 +19,7 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* stockage indisponible */ } }
   };
 
+  const APP_VERSION = 'v6';
   const ROCHES = (window.ROCHES || []).slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
   const BY_ID = Object.fromEntries(ROCHES.map((r) => [r.id, r]));
   const FAM = {
@@ -1320,6 +1321,8 @@ Donne 1 à 3 candidats triés par confiance décroissante (confiance en %, la so
     document.documentElement.setAttribute('data-theme', t);
     try { localStorage.setItem('gr-theme', t); } catch (e) {}
   });
+  const vEl = $('#appVersion');
+  if (vEl) vEl.textContent = 'Lithos ' + APP_VERSION;
   const pt = $('#photosToggle');
   pt.checked = Photos.enabled;
   pt.addEventListener('change', () => {
@@ -1330,8 +1333,16 @@ Donne 1 à 3 candidats triés par confiance décroissante (confiance en %, la so
   });
 
   /* Application installable (PWA) */
-  if ('serviceWorker' in navigator && location.protocol === 'https:') {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* non disponible (iframe, navigateur privé…) */ });
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      // Une nouvelle version vient d'être installée : on recharge une fois
+      if (hadController && !reloading) { reloading = true; location.reload(); }
+    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+      .then((reg) => reg.update())
+      .catch(() => { /* non disponible (iframe, navigateur privé…) */ });
   }
   let installEvt = null;
   const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;

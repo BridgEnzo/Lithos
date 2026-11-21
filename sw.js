@@ -1,12 +1,13 @@
 /*
  * Service worker : rend le guide utilisable hors ligne.
- * - fichiers du site : mis en cache à l'installation, servis depuis le cache
- *   puis mis à jour en arrière-plan ;
+ * - fichiers du site : « réseau d'abord » (toujours la dernière version quand
+ *   il y a du réseau), copie en cache pour le hors-ligne ; si le réseau ne
+ *   répond pas en 4 s, la copie en cache est servie ;
  * - photos Wikimedia et tuiles de carte consultées : gardées en cache
  *   (300 éléments max) pour être revues sans réseau.
  * Pensez à changer VERSION après chaque modification du site.
  */
-const VERSION = 'v5';
+const VERSION = 'v6';
 const APP = 'roches-app-' + VERSION;
 const MEDIA = 'roches-media';
 const FILES = [
@@ -18,7 +19,10 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(APP).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' contourne le cache HTTP (GitHub Pages garde les fichiers 10 min)
+  e.waitUntil(caches.open(APP)
+    .then((c) => c.addAll(FILES.map((u) => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -37,13 +41,26 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // Fichiers du site : cache d'abord, mise à jour en arrière-plan
+  // Fichiers du site : réseau d'abord (revalidé), cache en secours
   if (url.origin === location.origin) {
-    e.respondWith(caches.open(APP).then(async (c) => {
-      const hit = await c.match(req, { ignoreSearch: true });
-      const net = fetch(req).then((res) => { if (res.ok) c.put(req, res.clone()); return res; }).catch(() => null);
-      return hit || (await net) || c.match('index.html');
-    }));
+    e.respondWith((async () => {
+      const c = await caches.open(APP);
+      const key = url.origin + url.pathname;
+      const net = fetch(key, { cache: 'no-cache' }).then((res) => {
+        if (res.ok) c.put(key, res.clone());
+        return res;
+      });
+      const timeout = new Promise((resolve) => setTimeout(resolve, 4000, null));
+      try {
+        const res = await Promise.race([net, timeout]);
+        if (res) return res;
+      } catch (err) { /* hors ligne */ }
+      const hit = await c.match(key, { ignoreSearch: true });
+      if (hit) return hit;
+      try { return await net; } catch (err) {
+        return (await c.match(new URL('index.html', self.registration.scope).href)) || Response.error();
+      }
+    })());
     return;
   }
 
